@@ -1,0 +1,10 @@
+CREATE TABLE machine_learning_curated AS
+SELECT DISTINCT
+    stt.sensorreadingtime,
+    stt.serialnumber,
+    stt.distancefromobject,
+    at.x,
+    at.y,
+    at.z
+FROM step_trainer_trusted stt
+JOIN accelerometer_trusted at ON stt.sensorreadingtime = at.timestamp

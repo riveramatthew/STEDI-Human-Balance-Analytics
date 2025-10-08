@@ -1,10 +1,9 @@
 """
-AWS Glue ETL Job: Accelerometer Landing to Trusted Zone
-Purpose: Join accelerometer data with trusted customers to ensure privacy compliance
-Input: s3://stedi-s3/accelerometer/landing/, s3://stedi-s3/customer/trusted/
-Output: s3://stedi-s3/accelerometer/trusted/
+AWS Glue ETL Job: Customer Trusted to Curated Zone
+Purpose: Create curated customer dataset containing only customers with accelerometer data
+Input: s3://stedi-s3/customer/trusted/, s3://stedi-s3/accelerometer/trusted/
+Output: s3://stedi-s3/customer/curated/
 """
-
 import sys
 from awsglue.transforms import Join, ApplyMapping
 from awsglue.utils import getResolvedOptions
@@ -20,19 +19,7 @@ spark = glue_context.spark_session
 job = Job(glue_context)
 job.init(args["JOB_NAME"], args)
 
-# Read accelerometer landing data
-accelerometer_landing_df = glue_context.create_dynamic_frame.from_options(
-    format_options={"multiline": False},
-    connection_type="s3",
-    format="json",
-    connection_options={
-        "paths": ["s3://stedi-s3/accelerometer/landing/"],
-        "recurse": True,
-    },
-    transformation_ctx="accelerometer_landing_df",
-)
-
-# Read customer trusted data (customers who consented to share data)
+# Read customer trusted data
 customer_trusted_df = glue_context.create_dynamic_frame.from_options(
     format_options={"multiline": False},
     connection_type="s3",
@@ -44,39 +31,56 @@ customer_trusted_df = glue_context.create_dynamic_frame.from_options(
     transformation_ctx="customer_trusted_df",
 )
 
-# Join accelerometer data with trusted customers
-# Only keep accelerometer records for customers who gave consent
-accelerometer_customer_join = Join.apply(
-    frame1=accelerometer_landing_df,
-    frame2=customer_trusted_df,
-    keys1=["user"],
-    keys2=["email"],
-    transformation_ctx="accelerometer_customer_join",
-)
-
-# Select only accelerometer fields (drop customer fields)
-accelerometer_trusted_df = ApplyMapping.apply(
-    frame=accelerometer_customer_join,
-    mappings=[
-        ("user", "string", "user", "string"),
-        ("timeStamp", "long", "timeStamp", "long"),
-        ("x", "double", "x", "float"),
-        ("y", "double", "y", "float"),
-        ("z", "double", "z", "float"),
-    ],
-    transformation_ctx="accelerometer_trusted_df",
-)
-
-# Write accelerometer trusted data to S3
-glue_context.write_dynamic_frame.from_options(
-    frame=accelerometer_trusted_df,
+# Read accelerometer trusted data (CHANGED FROM LANDING)
+accelerometer_trusted_df = glue_context.create_dynamic_frame.from_options(
+    format_options={"multiline": False},
     connection_type="s3",
     format="json",
     connection_options={
-        "path": "s3://stedi-s3/accelerometer/trusted/",
-        "partitionKeys": [],
+        "paths": ["s3://stedi-s3/accelerometer/trusted/"],
+        "recurse": True,
     },
-    transformation_ctx="accelerometer_trusted_output",
+    transformation_ctx="accelerometer_trusted_df",
+)
+
+# Join customers with accelerometer data
+# This ensures we only keep customers who have accelerometer readings
+customer_accelerometer_join = Join.apply(
+    frame1=customer_trusted_df,
+    frame2=accelerometer_trusted_df,
+    keys1=["email"],
+    keys2=["user"],
+    transformation_ctx="customer_accelerometer_join",
+)
+
+# Select only customer fields (drop accelerometer fields)
+customer_curated_df = ApplyMapping.apply(
+    frame=customer_accelerometer_join,
+    mappings=[
+        ("serialNumber", "string", "serialNumber", "string"),
+        ("shareWithPublicAsOfDate", "long", "shareWithPublicAsOfDate", "long"),
+        ("birthDay", "string", "birthDay", "string"),
+        ("registrationDate", "long", "registrationDate", "long"),
+        ("shareWithResearchAsOfDate", "long", "shareWithResearchAsOfDate", "long"),
+        ("customerName", "string", "customerName", "string"),
+        ("email", "string", "email", "string"),
+        ("lastUpdateDate", "long", "lastUpdateDate", "long"),
+        ("phone", "string", "phone", "string"),
+        ("shareWithFriendsAsOfDate", "long", "shareWithFriendsAsOfDate", "long"),
+    ],
+    transformation_ctx="customer_curated_df",
+)
+
+# Write curated customer data to S3
+glue_context.write_dynamic_frame.from_options(
+    frame=customer_curated_df,
+    connection_type="s3",
+    format="json",
+    connection_options={
+        "path": "s3://stedi-s3/customer/curated/",
+        "partitionKeys": []
+    },
+    transformation_ctx="customer_curated_output",
 )
 
 job.commit()
